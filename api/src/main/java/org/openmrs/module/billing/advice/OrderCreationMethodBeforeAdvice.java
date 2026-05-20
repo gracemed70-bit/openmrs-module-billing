@@ -11,6 +11,9 @@ import org.openmrs.Patient;
 import org.openmrs.Provider;
 import org.openmrs.User;
 import org.openmrs.api.context.Context;
+import org.openmrs.module.billing.api.BillService;
+import org.openmrs.module.billing.api.CashierItemPriceService;
+import org.openmrs.module.billing.api.CashPointService;
 import org.openmrs.module.billing.api.base.PagingInfo;
 import org.openmrs.module.billing.api.model.Bill;
 import org.openmrs.module.billing.api.model.BillLineItem;
@@ -19,9 +22,6 @@ import org.openmrs.module.billing.api.model.CashPoint;
 import org.openmrs.module.billing.api.model.CashierItemPrice;
 import org.openmrs.module.billing.api.model.StockItem;
 import org.openmrs.module.billing.api.search.BillSearch;
-import org.openmrs.module.billing.api.service.BillService;
-import org.openmrs.module.billing.api.service.CashPointService;
-import org.openmrs.module.billing.api.service.PriceService;
 import org.openmrs.module.billableservices.api.IBillableServiceService;
 import org.openmrs.module.billableservices.api.model.BillableService;
 import org.openmrs.order.Order;
@@ -34,7 +34,7 @@ public class OrderCreationMethodBeforeAdvice implements MethodBeforeAdvice {
 	private static final Logger LOG = LoggerFactory.getLogger(OrderCreationMethodBeforeAdvice.class);
 	
 	private BillService billService;
-	private PriceService priceService;
+	private CashierItemPriceService priceService;
 	private CashPointService cashPointService;
 	private IBillableServiceService billableServiceService;
 	
@@ -144,7 +144,7 @@ public class OrderCreationMethodBeforeAdvice implements MethodBeforeAdvice {
 		this.billService = billService;
 	}
 	
-	public void setPriceService(PriceService priceService) {
+	public void setPriceService(CashierItemPriceService priceService) {
 		this.priceService = priceService;
 	}
 	
