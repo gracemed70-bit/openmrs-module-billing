@@ -21,6 +21,14 @@ jobs:
       MAVEN_REPO_USERNAME: ${{ secrets.MAVEN_REPO_USERNAME }}
       MAVEN_REPO_API_KEY: ${{ secrets.MAVEN_REPO_API_KEY }}
 
+    # Upload the built OMOD file as an artifact
+    steps:
+      - name: Upload OMOD artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-omod
+          path: omod/target/*.omod
+
   owasp-dependency-check:
     if: ${{ github.event_name != 'pull_request' }}
     uses: openmrs/openmrs-contrib-gha-workflows/.github/workflows/owasp-dependency-check.yml@main
