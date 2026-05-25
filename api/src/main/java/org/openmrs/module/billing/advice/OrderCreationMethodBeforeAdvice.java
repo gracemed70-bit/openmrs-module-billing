@@ -20,6 +20,8 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.Collections;  
+import org.openmrs.module.billing.api.search.BillSearch;
 
 import lombok.extern.slf4j.Slf4j;
 import org.openmrs.DrugOrder;
@@ -32,6 +34,7 @@ import org.openmrs.VisitAttribute;
 import org.openmrs.api.OrderService;
 import org.openmrs.api.context.Context;
 import org.openmrs.module.billing.api.BillService;
+
 import org.openmrs.module.billing.api.BillableServiceService;
 import org.openmrs.module.billing.api.CashPointService;
 import org.openmrs.module.billing.api.ItemPriceService;
