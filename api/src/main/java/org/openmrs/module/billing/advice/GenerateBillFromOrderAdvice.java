@@ -27,6 +27,8 @@ import org.openmrs.module.billing.api.model.CashierItemPrice;
 import org.openmrs.module.billing.api.model.ExemptionType;
 import org.openmrs.module.billing.api.search.BillableServiceSearch;
 import org.openmrs.module.stockmanagement.api.StockManagementService;
+import org.openmrs.module.billing.api.search.BillSearch;  
+import java.util.Collections;
 import org.openmrs.module.stockmanagement.api.model.StockItem;
 import org.springframework.aop.AfterReturningAdvice;
 
@@ -170,10 +172,22 @@ public class GenerateBillFromOrderAdvice implements AfterReturningAdvice {
 	public void addBillItemToBill(Order order, Patient patient, String cashierUUID, StockItem stockitem,
 	        BillableService service, Integer quantity, Date orderDate, BillStatus lineItemStatus) {
 		try {
-			// Search for a bill
-			Bill activeBill = new Bill();
-			activeBill.setPatient(patient);
-			activeBill.setStatus(BillStatus.PENDING);
+			
+			// Look for an existing PENDING bill for this patient  
+			BillSearch search = new BillSearch();  
+			search.setPatientUuid(patient.getUuid());  
+			search.setStatuses(Collections.singletonList(BillStatus.PENDING));  
+			List<Bill> existingBills = billService.getBills(search, null);  
+  
+			Bill activeBill;  
+			if (!existingBills.isEmpty()) {  
+  				activeBill = existingBills.get(0);  // reuse the existing bill  
+			} else {  
+   			    activeBill = new Bill();            // only create a new one if none exists  
+    		    activeBill.setPatient(patient);  
+    		    activeBill.setStatus(BillStatus.PENDING);  
+			}
+			
 			BillLineItem billLineItem = new BillLineItem();
 			List<CashierItemPrice> itemPrices = new ArrayList<>();
 			if (stockitem != null) {
