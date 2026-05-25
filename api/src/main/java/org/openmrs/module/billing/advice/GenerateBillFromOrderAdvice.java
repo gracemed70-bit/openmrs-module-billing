@@ -28,10 +28,10 @@ import org.openmrs.module.billing.api.model.ExemptionType;
 import org.openmrs.module.billing.api.search.BillableServiceSearch;
 import org.openmrs.module.stockmanagement.api.StockManagementService;
 import org.openmrs.module.billing.api.search.BillSearch;  
-import java.util.Collections;
 import org.openmrs.module.stockmanagement.api.model.StockItem;
 import org.springframework.aop.AfterReturningAdvice;
 
+import java.util.Collections;
 import javax.annotation.Nullable;
 import javax.validation.constraints.Null;
 import java.lang.reflect.Method;
