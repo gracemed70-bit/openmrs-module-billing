@@ -115,10 +115,22 @@ public class OrderCreationMethodBeforeAdvice implements MethodBeforeAdvice {
 	public void addBillItemToBill(Order order, Patient patient, String cashierUUID, StockItem stockitem,
 	        BillableService service, Integer quantity, Date orderDate) {
 		try {
-			// Search for a bill
-			Bill activeBill = new Bill();
-			activeBill.setPatient(patient);
-			activeBill.setStatus(BillStatus.PENDING);
+
+			// Look for an existing PENDING bill for this patient  
+			BillSearch search = new BillSearch();  
+			search.setPatientUuid(patient.getUuid());  
+			search.setStatuses(Collections.singletonList(BillStatus.PENDING));  
+			List<Bill> existingBills = billService.getBills(search, null);  
+  
+			Bill activeBill;  
+			if (!existingBills.isEmpty()) {  
+  				activeBill = existingBills.get(0);  // reuse the existing bill  
+			} else {  
+   			    activeBill = new Bill();            // only create a new one if none exists  
+    		    activeBill.setPatient(patient);  
+    		    activeBill.setStatus(BillStatus.PENDING);  
+			}
+	
 			
 			// Bill Item
 			BillLineItem billLineItem = new BillLineItem();
