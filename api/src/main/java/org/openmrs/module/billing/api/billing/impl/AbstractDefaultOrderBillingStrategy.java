@@ -10,6 +10,7 @@
 package org.openmrs.module.billing.api.billing.impl;
 
 import java.math.BigDecimal;
+import java.util.Collections;  
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -38,12 +39,11 @@ import org.openmrs.module.billing.api.model.BillLineItemStatus;
 import org.openmrs.module.billing.api.model.BillStatus;
 import org.openmrs.module.billing.api.model.CashPoint;
 import org.openmrs.module.billing.api.model.ExemptionType;
+import org.openmrs.module.billing.api.search.BillSearch;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import java.util.Collections;  
-import org.openmrs.module.billing.api.search.BillSearch;
 
 
 /**
@@ -100,8 +100,11 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 	
 	@Override
 	protected BillingResult handleDiscontinuedOrder(Order order) {
-		voidPreviousLineItem(order, "Order discontinued");
-		return BillingResult.discontinued();
+		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
+    	return txTemplate.execute(status -> {  
+       		voidPreviousLineItem(order, "Order discontinued");  
+        	return BillingResult.discontinued();  
+    	});  
 	}
 	
 	protected void voidPreviousLineItem(Order order, String reason) {
@@ -169,23 +172,37 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 			}
 		}
 
-		lineItem.setLineItemOrder(bill.getLineItems() == null ? 0 : bill.getLineItems().size()); // NEW  
+		  
+		int nextOrder = 0;  
+		if (bill.getLineItems() != null) {  
+    		nextOrder = bill.getLineItems().stream()  
+            		.mapToInt(li -> li.getLineItemOrder() == null ? 0 : li.getLineItemOrder() + 1)  
+            		.max().orElse(0);  
+		}  
+		lineItem.setLineItemOrder(nextOrder);
 		bill.addLineItem(lineItem);
 				
 		Bill savedBill = billService.saveBill(bill);
 		return BillingResult.created(savedBill);
 	}
-
+	/**  
+	* Find the patient's existing PENDING bill for the order's visit. Orders without a visit do not  
+ 	* aggregate — they always create a new bill.  
+ 	*  
+ 	* @param patient the patient to find a bill for  
+ 	* @param order the order whose visit scopes the lookup  
+ 	* @return the pending bill, or null if none exists  
+ 	*/  
 	protected Bill findPendingBill(Patient patient, Order order) {  
 		if (order.getEncounter() == null || order.getEncounter().getVisit() == null) {  
-        return null; // no visit -> don't aggregate  
+        	return null; // no visit -> don't aggregate  
     	}  
 		BillSearch search = new BillSearch();
 		search.setPatientUuid(patient.getUuid());  
     	search.setStatuses(Collections.singletonList(BillStatus.PENDING));  
 		search.setVisitUuid(order.getEncounter().getVisit().getUuid());  
     	List<Bill> bills = billService.getBills(search, null);  
-    	return (bills == null || bills.isEmpty()) ? null : bills.get(0);  
+    	return bills.isEmpty() ? null : bills.get(0);  
 	}
 	// resolveCashier() and resolveCashPoint() are inherited from the interface
 	// and must be implemented by concrete strategy classes.
@@ -199,7 +216,6 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 		lineItem.setPrice(price);
 		lineItem.setQuantity(quantity);
 		lineItem.setStatus(paymentStatus);
-		lineItem.setLineItemOrder(0);
 		lineItem.setOrder(order);
 		return lineItem;
 	}
