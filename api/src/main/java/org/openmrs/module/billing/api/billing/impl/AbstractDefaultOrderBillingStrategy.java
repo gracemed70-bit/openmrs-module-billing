@@ -20,6 +20,8 @@ import java.util.stream.Collectors;
 
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import java.util.Collections;  
+import org.openmrs.module.billing.api.search.BillSearch;
 import org.openmrs.Order;
 import org.openmrs.Patient;
 import org.openmrs.PatientProgram;
@@ -76,7 +78,8 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 	
 	@Override
 	protected BillingResult handleNewOrder(Order order) {
-		return createBillIfAbsent(order);
+		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
+    	return txTemplate.execute(status -> createBillIfAbsent(order));  
 	}
 	
 	@Override
@@ -139,32 +142,48 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 	}
 	
 	protected BillingResult createBill(Patient patient, BillLineItem lineItem, Order order) {
-		Provider cashier = resolveCashier(order);
-		if (cashier == null) {
-			log.error("Cannot resolve cashier for order: {}", order.getUuid());
-			return BillingResult.skipped("Cannot resolve cashier");
-		}
+		Bill bill = findPendingBill(patient, order);   // NEW: lines 142-152 replaced by this lookup
+
+		if (bill == null) { 
+			// existing create-path (was lines 142-161) moves inside this branch
+			Provider cashier = resolveCashier(order);
+			if (cashier == null) {
+				log.error("Cannot resolve cashier for order: {}", order.getUuid());
+				return BillingResult.skipped("Cannot resolve cashier");
+			}
 		
-		CashPoint cashPoint = resolveCashPoint();
-		if (cashPoint == null) {
-			log.error("Cannot resolve cash point for order: {}", order.getUuid());
-			return BillingResult.skipped("Cannot resolve cash point");
+			CashPoint cashPoint = resolveCashPoint();
+			if (cashPoint == null) {
+				log.error("Cannot resolve cash point for order: {}", order.getUuid());
+				return BillingResult.skipped("Cannot resolve cash point");
+			}
+			bill = new Bill();
+			bill.setPatient(patient);
+			bill.setStatus(BillStatus.PENDING);
+			bill.setCashier(cashier);
+			bill.setCashPoint(cashPoint);
+			if (order.getEncounter() != null) {
+				bill.setVisit(order.getEncounter().getVisit());
+			}
 		}
-		
-		Bill bill = new Bill();
-		bill.setPatient(patient);
-		bill.setStatus(BillStatus.PENDING);
-		bill.setCashier(cashier);
-		bill.setCashPoint(cashPoint);
-		if (order.getEncounter() != null) {
-			bill.setVisit(order.getEncounter().getVisit());
-		}
+
+		lineItem.setLineItemOrder(bill.getLineItems() == null ? 0 : bill.getLineItems().size()); // NEW  
 		bill.addLineItem(lineItem);
-		
+				
 		Bill savedBill = billService.saveBill(bill);
 		return BillingResult.created(savedBill);
 	}
-	
+
+	protected Bill findPendingBill(Patient patient, Order order) {  
+		BillSearch search = new BillSearch();
+		search.setPatientUuid(patient.getUuid());  
+    	search.setStatuses(Collections.singletonList(BillStatus.PENDING));  
+    	if (order.getEncounter() != null && order.getEncounter().getVisit() != null) {  
+        	search.setVisitUuid(order.getEncounter().getVisit().getUuid());  
+    	}  
+    	List<Bill> bills = billService.getBills(search, null);  
+    	return bills.isEmpty() ? null : bills.get(0);  
+	}
 	// resolveCashier() and resolveCashPoint() are inherited from the interface
 	// and must be implemented by concrete strategy classes.
 	
