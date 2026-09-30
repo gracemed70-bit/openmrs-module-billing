@@ -20,8 +20,6 @@ import java.util.stream.Collectors;
 
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
-import java.util.Collections;  
-import org.openmrs.module.billing.api.search.BillSearch;
 import org.openmrs.Order;
 import org.openmrs.Patient;
 import org.openmrs.PatientProgram;
@@ -44,6 +42,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import java.util.Collections;  
+import org.openmrs.module.billing.api.search.BillSearch;
+
 
 /**
  * Default implementation base class that provides shared logic for bill creation, line item
@@ -84,7 +85,8 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 	
 	@Override
 	protected BillingResult handleRenewOrder(Order order) {
-		return createBillIfAbsent(order);
+		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
+    	return txTemplate.execute(status -> createBillIfAbsent(order));  
 	}
 	
 	@Override
@@ -175,14 +177,15 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 	}
 
 	protected Bill findPendingBill(Patient patient, Order order) {  
+		if (order.getEncounter() == null || order.getEncounter().getVisit() == null) {  
+        return null; // no visit -> don't aggregate  
+    	}  
 		BillSearch search = new BillSearch();
 		search.setPatientUuid(patient.getUuid());  
     	search.setStatuses(Collections.singletonList(BillStatus.PENDING));  
-    	if (order.getEncounter() != null && order.getEncounter().getVisit() != null) {  
-        	search.setVisitUuid(order.getEncounter().getVisit().getUuid());  
-    	}  
+		search.setVisitUuid(order.getEncounter().getVisit().getUuid());  
     	List<Bill> bills = billService.getBills(search, null);  
-    	return bills.isEmpty() ? null : bills.get(0);  
+    	return (bills == null || bills.isEmpty()) ? null : bills.get(0);  
 	}
 	// resolveCashier() and resolveCashPoint() are inherited from the interface
 	// and must be implemented by concrete strategy classes.
