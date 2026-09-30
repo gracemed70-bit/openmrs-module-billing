@@ -203,15 +203,19 @@ public class OrderBillingEventListenerTest extends BaseModuleContextSensitiveTes
 		
 		// 5. Verify a new bill was created with a new line item
 		List<Bill> updatedBills = billService.getBillsByPatientUuid(patient.getUuid(), null);
-		assertTrue(updatedBills.size() >= 2, "A new bill should be created for the revised order");
-		
-		Bill newBill = updatedBills.stream().filter(b -> !b.getId().equals(bills.get(0).getId())).findFirst().orElse(null);
-		assertNotNull(newBill);
-		assertFalse(newBill.getLineItems().isEmpty());
-		
-		BillLineItem newLineItem = newBill.getLineItems().get(0);
-		assertFalse(newLineItem.getVoided());
-		assertEquals(savedRevise.getId(), newLineItem.getOrder().getId());
+				
+		Bill bill = updatedBills.stream()  
+        		.filter(b -> b.getId().equals(bills.get(0).getId()))  
+        		.findFirst().orElse(null);  
+		assertNotNull(bill, "The revised order should aggregate onto the existing pending bill");  
+  
+		List<BillLineItem> activeLineItems = bill.getLineItems().stream()  
+        		.filter(li -> !li.getVoided())  
+        		.collect(Collectors.toList());  
+		assertEquals(1, activeLineItems.size(), "Bill should have exactly one active line item");  
+  
+		BillLineItem newLineItem = activeLineItems.get(0);  
+		assertEquals(savedRevise.getId(), newLineItem.getOrder().getId());  
 		assertEquals(new BigDecimal("75.00"), newLineItem.getPrice());
 	}
 	
