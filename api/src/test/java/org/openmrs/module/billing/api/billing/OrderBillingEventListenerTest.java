@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.math.BigDecimal;
 import java.util.Date;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -201,18 +202,21 @@ public class OrderBillingEventListenerTest extends BaseModuleContextSensitiveTes
 		assertTrue(voidedLineItem.getVoided(), "Original line item should be voided after revision");
 		assertEquals("Order revised", voidedLineItem.getVoidReason());
 		
-		// 5. Verify a new bill was created with a new line item
-		List<Bill> updatedBills = billService.getBillsByPatientUuid(patient.getUuid(), null);
-		assertTrue(updatedBills.size() >= 2, "A new bill should be created for the revised order");
-		
-		Bill newBill = updatedBills.stream().filter(b -> !b.getId().equals(bills.get(0).getId())).findFirst().orElse(null);
-		assertNotNull(newBill);
-		assertFalse(newBill.getLineItems().isEmpty());
-		
-		BillLineItem newLineItem = newBill.getLineItems().get(0);
-		assertFalse(newLineItem.getVoided());
-		assertEquals(savedRevise.getId(), newLineItem.getOrder().getId());
-		assertEquals(new BigDecimal("75.00"), newLineItem.getPrice());
+		// 5. Verify the revised line item was appended to the SAME pending bill  
+		List<Bill> updatedBills = billService.getBillsByPatientUuid(patient.getUuid(), null);  
+		assertNotNull(updatedBills);  
+		assertEquals(1, updatedBills.size(), "The revised order should aggregate onto the existing pending bill");  
+  
+		Bill bill = updatedBills.get(0);  
+		List<BillLineItem> activeLineItems = bill.getLineItems().stream()  
+        		.filter(li -> !li.getVoided())  
+        		.collect(Collectors.toList());  
+		assertEquals(1, activeLineItems.size(), "Bill should have exactly one active line item (old one voided)");  
+  
+		BillLineItem newLineItem = activeLineItems.get(0);  
+		assertEquals(savedRevise.getId(), newLineItem.getOrder().getId());  
+		assertEquals(new BigDecimal("75.00"), newLineItem.getPrice());  
+		assertEquals(BillLineItemStatus.PENDING, newLineItem.getStatus());	
 	}
 	
 	@Test
@@ -344,6 +348,27 @@ public class OrderBillingEventListenerTest extends BaseModuleContextSensitiveTes
 		
 		List<Bill> bills = billService.getBillsByPatientUuid(patient.getUuid(), null);
 		assertTrue(bills == null || bills.isEmpty(), "No bill should be created when no stock item matches the drug");
+	}
+
+	@Test  
+	public void shouldAggregateLineItemsOntoSamePendingBillForSameVisit() {  
+    	Concept testConcept = conceptService.getConcept(5497);  
+    	Encounter encounter = encounterService.getEncounter(3);  
+    	Patient patient = encounter.getPatient();  
+  
+    	Order order1 = saveNewTestOrder(patient, testConcept, encounter);  
+    	listener.processOrder(order1);  
+    	Context.flushSession();  
+  
+    	Order order2 = saveNewTestOrder(patient, testConcept, encounter);  
+    	listener.processOrder(order2);  
+    	Context.flushSession();  
+    	Context.clearSession();  
+  
+    	List<Bill> bills = billService.getBillsByPatientUuid(patient.getUuid(), null);  
+    	assertNotNull(bills);  
+    	assertEquals(1, bills.size(), "Both orders should aggregate onto one pending bill");  
+    	assertEquals(2, bills.get(0).getLineItems().size());  
 	}
 	
 	@Test
