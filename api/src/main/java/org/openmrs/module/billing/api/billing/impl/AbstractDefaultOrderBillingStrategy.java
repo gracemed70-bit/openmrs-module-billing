@@ -26,6 +26,7 @@ import org.openmrs.Patient;
 import org.openmrs.PatientProgram;
 import org.openmrs.Provider;
 import org.openmrs.api.ProgramWorkflowService;
+import org.openmrs.api.context.Context;
 import org.openmrs.module.billing.api.BillExemptionService;
 import org.openmrs.module.billing.api.BillLineItemService;
 import org.openmrs.module.billing.api.BillService;
@@ -77,27 +78,29 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 		setSupportedActions(EnumSet.of(Order.Action.NEW, Order.Action.RENEW, Order.Action.REVISE, Order.Action.DISCONTINUE));
 	}
 	
-	@Override
-	protected BillingResult handleNewOrder(Order order) {
-		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
-    	return txTemplate.execute(status -> createBillIfAbsent(order));  
-	}
 	
 	@Override
-	protected BillingResult handleRenewOrder(Order order) {
-		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
-    	return txTemplate.execute(status -> createBillIfAbsent(order));  
-	}
+    protected BillingResult handleNewOrder(Order order) {
+        TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
+        return txTemplate.execute(status -> processOrderAggregated(order));  
+    }
 	
 	@Override
-	protected BillingResult handleRevisedOrder(Order order) {
-		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
-		return txTemplate.execute(status -> {
-			voidPreviousLineItem(order, "Order revised");
-			return createBillIfAbsent(order);
-		});
-	}
+    protected BillingResult handleRenewOrder(Order order) {
+        TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
+        return txTemplate.execute(status -> processOrderAggregated(order));  
+    }
+
 	
+	@Override
+    protected BillingResult handleRevisedOrder(Order order) {
+        TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+        return txTemplate.execute(status -> {
+            voidPreviousLineItem(order, "Order revised");
+            return processOrderAggregated(order);
+        });
+    }
+
 	@Override
 	protected BillingResult handleDiscontinuedOrder(Order order) {
 		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
@@ -106,6 +109,24 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
         	return BillingResult.discontinued();  
     	});  
 	}
+	
+    /**
+     * Process order with aggregation locking to prevent concurrent creation of duplicate bills.
+     * 
+     * @param order the order to process
+     * @return the billing result
+     */
+    private BillingResult processOrderAggregated(Order order) {
+        // Use patient UUID as a lock key to serialize aggregation for the same patient
+        String lockKey = order.getPatient().getUuid();
+    
+        synchronized (lockKey.intern()) {
+            log.info("Processing order {} for patient {} with aggregation lock",
+                    order.getUuid(), order.getPatient().getUuid());
+        
+            return createBillIfAbsent(order);
+          }
+    }
 	
 	protected void voidPreviousLineItem(Order order, String reason) {
 		Order previousOrder = order.getPreviousOrder();
@@ -172,38 +193,81 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 			}
 		}
 
-		  
-		int nextOrder = 0;  
-		if (bill.getLineItems() != null) {  
-    		nextOrder = bill.getLineItems().stream()  
-            		.mapToInt(li -> li.getLineItemOrder() == null ? 0 : li.getLineItemOrder() + 1)  
-            		.max().orElse(0);  
-		}  
+		int nextOrder = 0;
+        if (bill.getLineItems() != null && !bill.getLineItems().isEmpty()) {
+             nextOrder = bill.getLineItems().stream()
+                    .filter(item -> item != null && !item.getVoided())
+                    .mapToInt(item -> item.getLineItemOrder() == null ? 0 : item.getLineItemOrder())
+                    .max()
+                    .orElse(-1) + 1;
+    
+             log.info("Bill {} already has {} line items; adding new line item at order {}",
+                    bill.getUuid() == null ? "NEW" : bill.getUuid(),
+                    bill.getLineItems().size(),
+                    nextOrder);
+        }
+		
 		lineItem.setLineItemOrder(nextOrder);
 		bill.addLineItem(lineItem);
-				
+
 		Bill savedBill = billService.saveBill(bill);
-		return BillingResult.created(savedBill);
+
+        // CRITICAL: Force flush so that concurrent threads see the updated bill
+        Context.flushSession();
+
+        log.info("Bill {} now has {} line items. Saved for order {}",
+                savedBill.getUuid(),
+                savedBill.getLineItems() == null ? 0 : savedBill.getLineItems().size(),
+                order.getUuid());
+
+        return bill.getId() == null
+                ? BillingResult.created(savedBill)
+                : BillingResult.updated(savedBill);
 	}
-	/**  
-	* Find the patient's existing PENDING bill for the order's visit. Orders without a visit do not  
- 	* aggregate — they always create a new bill.  
- 	*  
- 	* @param patient the patient to find a bill for  
- 	* @param order the order whose visit scopes the lookup  
- 	* @return the pending bill, or null if none exists  
- 	*/  
-	protected Bill findPendingBill(Patient patient, Order order) {  
-		if (order.getEncounter() == null || order.getEncounter().getVisit() == null) {  
-        	return null; // no visit -> don't aggregate  
-    	}  
-		BillSearch search = new BillSearch();
-		search.setPatientUuid(patient.getUuid());  
-    	search.setStatuses(Collections.singletonList(BillStatus.PENDING));  
-		search.setVisitUuid(order.getEncounter().getVisit().getUuid());  
-    	List<Bill> bills = billService.getBills(search, null);  
-    	return bills.isEmpty() ? null : bills.get(0);  
-	}
+	
+	/**
+    * Find the patient's existing PENDING bill for the order's visit.
+    * 
+    * This method is called within a synchronized block per patient, ensuring only one thread
+    * searches/creates per patient at a time.
+    * 
+    * @param patient the patient to find a bill for
+    * @param order the order whose visit scopes the lookup
+    * @return the pending bill, or null if none exists
+    */
+    protected Bill findPendingBill(Patient patient, Order order) {
+         if (patient == null) {
+         return null;
+        }
+    
+         // Orders without a visit cannot aggregate
+         if (order.getEncounter() == null || order.getEncounter().getVisit() == null) {
+             log.debug("Order {} has no visit; will not aggregate with existing bills", order.getUuid());
+             return null;
+         }
+    
+         String visitUuid = order.getEncounter().getVisit().getUuid();
+    
+         BillSearch search = new BillSearch();
+         search.setPatientUuid(patient.getUuid());
+         search.setStatuses(Collections.singletonList(BillStatus.PENDING));
+         search.setVisitUuid(visitUuid);
+    
+         List<Bill> bills = billService.getBills(search, null);
+    
+         if (bills.isEmpty()) {
+             log.debug("No pending bill found for patient {} in visit {}", patient.getUuid(), visitUuid);
+             return null;
+         }
+    
+         Bill bill = bills.get(0);
+         log.info("Found pending bill {} for patient {} in visit {}. Current line items: {}",
+                 bill.getUuid(), patient.getUuid(), visitUuid,
+                 bill.getLineItems() == null ? 0 : bill.getLineItems().size());
+    
+         return bill;
+     }
+
 	// resolveCashier() and resolveCashPoint() are inherited from the interface
 	// and must be implemented by concrete strategy classes.
 	
