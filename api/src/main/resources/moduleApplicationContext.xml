@@ -344,5 +344,8 @@
 
 	<bean id="patientPaymentStatusResolverFactory"
 	      class="org.openmrs.module.billing.api.PatientPaymentStatusResolverFactory"/>
+	
+	<bean id="completionAwareTestOrderBillingStrategy"  
+      class="org.openmrs.module.yourmodule.billing.CompletionAwareTestOrderBillingStrategy"/>
 
 </beans>
