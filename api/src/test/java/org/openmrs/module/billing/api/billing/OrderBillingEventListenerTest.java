@@ -206,17 +206,16 @@ public class OrderBillingEventListenerTest extends BaseModuleContextSensitiveTes
 		List<Bill> updatedBills = billService.getBillsByPatientUuid(patient.getUuid(), null);  
 		assertNotNull(updatedBills);  
 		assertEquals(1, updatedBills.size(), "The revised order should aggregate onto the existing pending bill");  
-  
+		  
 		Bill bill = updatedBills.get(0);  
-		List<BillLineItem> activeLineItems = bill.getLineItems().stream()  
-        		.filter(li -> !li.getVoided())  
-        		.collect(Collectors.toList());  
+		List<BillLineItem> activeLineItems = bill.getLineItems().stream().filter(li -> !li.getVoided())  
+		        .collect(Collectors.toList());  
 		assertEquals(1, activeLineItems.size(), "Bill should have exactly one active line item (old one voided)");  
-  
+		  
 		BillLineItem newLineItem = activeLineItems.get(0);  
 		assertEquals(savedRevise.getId(), newLineItem.getOrder().getId());  
 		assertEquals(new BigDecimal("75.00"), newLineItem.getPrice());  
-		assertEquals(BillLineItemStatus.PENDING, newLineItem.getStatus());	
+		assertEquals(BillLineItemStatus.PENDING, newLineItem.getStatus());  
 	}
 	
 	@Test
