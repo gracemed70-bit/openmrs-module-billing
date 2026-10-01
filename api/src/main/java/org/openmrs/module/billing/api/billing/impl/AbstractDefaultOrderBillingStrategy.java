@@ -97,14 +97,17 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 			return createBillIfAbsent(order);  
 		});
 	}
+
+	@Override  
+    protected BillingResult handleDiscontinuedOrder(Order order) {  
+	    Order previous = order.getPreviousOrder();  
+	    if (previous != null && previous.getFulfillerStatus() == Order.FulfillerStatus.COMPLETED) {  
+		    return BillingResult.skipped("Order fulfilled - keeping line item");  
+	    }  
+	    voidPreviousLineItem(order, "Order discontinued");  
+	    return BillingResult.discontinued();  
+    }
 	
-	@Override
-	protected BillingResult handleDiscontinuedOrder(Order order) {
-		return runSerializedForPatient(order, () -> {  
-			voidPreviousLineItem(order, "Order discontinued");  
-			return BillingResult.discontinued();  
-		});  
-	}
 	private static final ConcurrentMap<Integer, Object> PATIENT_LOCKS = new ConcurrentHashMap<>();  
   
 	/**  
