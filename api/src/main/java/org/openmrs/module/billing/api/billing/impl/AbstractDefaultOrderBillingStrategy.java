@@ -18,6 +18,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.concurrent.ConcurrentHashMap;  
+import java.util.concurrent.ConcurrentMap;
+import java.util.function.Supplier;
 
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -79,34 +82,44 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 	
 	@Override
 	protected BillingResult handleNewOrder(Order order) {
-		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
-    	return txTemplate.execute(status -> createBillIfAbsent(order));  
+		return runSerializedForPatient(order, () -> createBillIfAbsent(order));  
 	}
 	
 	@Override
 	protected BillingResult handleRenewOrder(Order order) {
-		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
-    	return txTemplate.execute(status -> createBillIfAbsent(order));  
+		return runSerializedForPatient(order, () -> createBillIfAbsent(order));  
 	}
 	
 	@Override
 	protected BillingResult handleRevisedOrder(Order order) {
-		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
-		return txTemplate.execute(status -> {
-			voidPreviousLineItem(order, "Order revised");
-			return createBillIfAbsent(order);
+		return runSerializedForPatient(order, () -> {  
+			voidPreviousLineItem(order, "Order revised");  
+			return createBillIfAbsent(order);  
 		});
 	}
 	
 	@Override
 	protected BillingResult handleDiscontinuedOrder(Order order) {
-		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
-    	return txTemplate.execute(status -> {  
-       		voidPreviousLineItem(order, "Order discontinued");  
-        	return BillingResult.discontinued();  
-    	});  
+		return runSerializedForPatient(order, () -> {  
+			voidPreviousLineItem(order, "Order discontinued");  
+			return BillingResult.discontinued();  
+		});  
 	}
-	
+	private static final ConcurrentMap<Integer, Object> PATIENT_LOCKS = new ConcurrentHashMap<>();  
+  
+	/**  
+	 * Runs the given billing work inside a transaction, serialized per patient.  
+	 * Only one thread per patient can be inside this at a time, so a second  
+	 * order's transaction always sees the bill committed by the first.  
+	 */  
+	private BillingResult runSerializedForPatient(Order order, java.util.function.Supplier<BillingResult> work) {  
+		Integer patientId = order.getPatient().getId();  
+		Object lock = PATIENT_LOCKS.computeIfAbsent(patientId, k -> new Object());  
+		synchronized (lock) {  
+			TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
+			return txTemplate.execute(status -> work.get());  
+		}  
+	}
 	protected void voidPreviousLineItem(Order order, String reason) {
 		Order previousOrder = order.getPreviousOrder();
 		if (previousOrder == null) {
