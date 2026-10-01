@@ -1430,5 +1430,20 @@
 		                         referencedTableName="cashier_bill_line_item" referencedColumnNames="bill_line_item_id"
 		                         onDelete="CASCADE"/>
 	</changeSet>
+	<changeSet id="openmrs.billing-014-20261001-unique-line-item-order" author="Aleazar">  
+		<preConditions onFail="MARK_RAN">  
+			<and>  
+				<tableExists tableName="cashier_bill_line_item"/>  
+				<columnExists tableName="cashier_bill_line_item" columnName="order_id"/>  
+				<not>  
+					<indexExists indexName="bill_line_item_order_unique"/>  
+				</not>  
+			</and>  
+		</preConditions>  
+		<comment>Enforce one bill line item per order so concurrent billing events cannot double-bill the same order.</comment>  
+		<addUniqueConstraint tableName="cashier_bill_line_item"  
+			columnNames="order_id"  
+			constraintName="bill_line_item_order_unique"/>  
+	</changeSet>
 
 </databaseChangeLog>
