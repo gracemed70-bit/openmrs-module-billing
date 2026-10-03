@@ -18,8 +18,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
-import java.util.concurrent.ConcurrentHashMap;  
-import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
 
 import lombok.Setter;
@@ -29,6 +27,7 @@ import org.openmrs.Patient;
 import org.openmrs.PatientProgram;
 import org.openmrs.Provider;
 import org.openmrs.api.ProgramWorkflowService;
+import org.openmrs.api.context.Context;
 import org.openmrs.module.billing.api.BillExemptionService;
 import org.openmrs.module.billing.api.BillLineItemService;
 import org.openmrs.module.billing.api.BillService;
@@ -97,35 +96,49 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 			return createBillIfAbsent(order);  
 		});
 	}
-
+	
 	@Override  
 	protected BillingResult handleDiscontinuedOrder(Order order) {  
-    	Order previous = order.getPreviousOrder();  
-    	if (previous != null) {  
-        	Order fresh = Context.getOrderService().getOrder(previous.getOrderId());  
-        	if (fresh != null && fresh.getFulfillerStatus() == Order.FulfillerStatus.COMPLETED) {  
-            	return BillingResult.skipped("Order fulfilled - keeping line item");  
+    	return runSerializedForPatient(order, () -> {  
+        	Order previous = order.getPreviousOrder();  
+        	if (previous != null) {  
+            	Context.getSession().evict(previous);  
+            	Order fresh = Context.getOrderService().getOrder(previous.getOrderId());  
+            	if (fresh == null) {  
+                	log.warn("Previous order {} not found, treating as discontinued", previous.getUuid());  
+            	} else {  
+                	log.info("DISCONTINUE {} -> previous {} fulfillerStatus={}",  
+                    	order.getUuid(), fresh.getUuid(), fresh.getFulfillerStatus());  
+                	if (fresh.getFulfillerStatus() == Order.FulfillerStatus.COMPLETED) {  
+                    	return BillingResult.skipped("Order fulfilled - keeping line item");  
+                	}  
+            	}  
         	}  
-    	}  
-    	voidPreviousLineItem(order, "Order discontinued");  
-    	return BillingResult.discontinued();  
+        	voidPreviousLineItem(order, "Order discontinued");  
+        	return BillingResult.discontinued();  
+    	});  
 	}
+
 	
-	private static final ConcurrentMap<Integer, Object> PATIENT_LOCKS = new ConcurrentHashMap<>();  
-  
 	/**  
 	 * Runs the given billing work inside a transaction, serialized per patient.  
 	 * Only one thread per patient can be inside this at a time, so a second  
 	 * order's transaction always sees the bill committed by the first.  
 	 */  
-	private BillingResult runSerializedForPatient(Order order, java.util.function.Supplier<BillingResult> work) {  
-		Integer patientId = order.getPatient().getId();  
-		Object lock = PATIENT_LOCKS.computeIfAbsent(patientId, k -> new Object());  
-		synchronized (lock) {  
-			TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
-			return txTemplate.execute(status -> work.get());  
-		}  
+
+	private static final Object[] PATIENT_LOCKS = new Object[64];  
+	static {  
+    	for (int i = 0; i < PATIENT_LOCKS.length; i++) PATIENT_LOCKS[i] = new Object();  
 	}
+	
+	private BillingResult runSerializedForPatient(Order order, Supplier<BillingResult> work) {  
+    	int idx = Math.floorMod(order.getPatient().getId(), PATIENT_LOCKS.length);  
+    	synchronized (PATIENT_LOCKS[idx]) {  
+        	TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
+        	return txTemplate.execute(status -> work.get());  
+    	}  
+	}
+	
 	protected void voidPreviousLineItem(Order order, String reason) {
 		Order previousOrder = order.getPreviousOrder();
 		if (previousOrder == null) {
@@ -191,13 +204,11 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 			}
 		}
 
-		  
-		int nextOrder = 0;  
-		if (bill.getLineItems() != null) {  
-    		nextOrder = bill.getLineItems().stream()  
-            		.mapToInt(li -> li.getLineItemOrder() == null ? 0 : li.getLineItemOrder() + 1)  
-            		.max().orElse(0);  
-		}  
+		int nextOrder = bill.getLineItems() == null ? 0  
+    		: bill.getLineItems().stream()  
+          		.mapToInt(li -> li.getLineItemOrder() == null ? 0 : li.getLineItemOrder())  
+          		.max().orElse(-1) + 1;
+		
 		lineItem.setLineItemOrder(nextOrder);
 		bill.addLineItem(lineItem);
 				
