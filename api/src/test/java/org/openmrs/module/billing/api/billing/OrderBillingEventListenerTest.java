@@ -125,7 +125,7 @@ public class OrderBillingEventListenerTest extends BaseModuleContextSensitiveTes
 		Patient patient = encounter.getPatient();
 		
 		// 1. Save and bill the original order
-		Order originalOrder = saveNewTestOrder(patient, testConcept, encounter);
+		Order originalOrder = saveNewTestOrder(patient, testConcept, encounter, Order.FulfillerStatus.RECEIVED);
 		listener.processOrder(originalOrder);
 		Context.flushSession();
 		
