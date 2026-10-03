@@ -126,9 +126,6 @@ public class OrderBillingEventListenerTest extends BaseModuleContextSensitiveTes
 		
 		// 1. Save and bill the original order
 		Order originalOrder = saveNewTestOrder(patient, testConcept, encounter);
-		originalOrder.setFulfillerStatus(Order.FulfillerStatus.RECEIVED);   // NEW: order is NOT completed  
-		orderService.saveOrder(originalOrder, null);                        // NEW: persist the status  
-		Context.flushSession();                                             // NEW: write it to the DB  
 		listener.processOrder(originalOrder);
 		Context.flushSession();
 		
@@ -390,20 +387,26 @@ public class OrderBillingEventListenerTest extends BaseModuleContextSensitiveTes
 		assertNotNull(bills);
 		assertEquals(1, bills.size(), "Only one bill should exist — second call should be idempotent");
 	}
-	
-	private Order saveNewTestOrder(Patient patient, Concept concept, Encounter encounter) {
-		TestOrder testOrder = new TestOrder();
-		testOrder.setPatient(patient);
-		testOrder.setConcept(concept);
-		testOrder.setEncounter(encounter);
-		testOrder.setOrderer(Context.getProviderService().getProvider(1));
-		testOrder.setCareSetting(orderService.getCareSetting(1));
-		testOrder.setOrderType(orderService.getOrderType(2));
-		testOrder.setDateActivated(new Date());
-		
-		Order savedOrder = orderService.saveOrder(testOrder, null);
-		assertNotNull(savedOrder.getId());
-		Context.flushSession();
-		return savedOrder;
+	private Order saveNewTestOrder(Patient patient, Concept concept, Encounter encounter) {  
+    	return saveNewTestOrder(patient, concept, encounter, null);  
+	}  
+	private Order saveNewTestOrder(Patient patient, Concept concept, Encounter encounter,  
+                               Order.FulfillerStatus fulfillerStatus) {  
+    	TestOrder testOrder = new TestOrder();  
+    	testOrder.setPatient(patient);  
+    	testOrder.setConcept(concept);  
+    	testOrder.setEncounter(encounter);  
+    	testOrder.setOrderer(Context.getProviderService().getProvider(1));  
+    	testOrder.setCareSetting(orderService.getCareSetting(1));  
+    	testOrder.setOrderType(orderService.getOrderType(2));  
+    	testOrder.setDateActivated(new Date());  
+    	if (fulfillerStatus != null) {  
+        	testOrder.setFulfillerStatus(fulfillerStatus);   // set BEFORE save  
+    	}  
+  
+    	Order savedOrder = orderService.saveOrder(testOrder, null);  
+    	assertNotNull(savedOrder.getId());  
+    	Context.flushSession();  
+    	return savedOrder;  
 	}
 }
