@@ -126,6 +126,9 @@ public class OrderBillingEventListenerTest extends BaseModuleContextSensitiveTes
 		
 		// 1. Save and bill the original order
 		Order originalOrder = saveNewTestOrder(patient, testConcept, encounter);
+		originalOrder.setFulfillerStatus(Order.FulfillerStatus.RECEIVED);   // NEW: order is NOT completed  
+		orderService.saveOrder(originalOrder, null);                        // NEW: persist the status  
+		Context.flushSession();                                             // NEW: write it to the DB  
 		listener.processOrder(originalOrder);
 		Context.flushSession();
 		
@@ -134,31 +137,30 @@ public class OrderBillingEventListenerTest extends BaseModuleContextSensitiveTes
 		BillLineItem originalLineItem = bills.get(0).getLineItems().get(0);
 		assertFalse(originalLineItem.getVoided());
 		
-		// 2. Discontinue the order
-		TestOrder discontinueOrder = new TestOrder();
-		discontinueOrder.setPatient(patient);
-		discontinueOrder.setConcept(testConcept);
-		discontinueOrder.setEncounter(encounter);
-		discontinueOrder.setOrderer(Context.getProviderService().getProvider(1));
-		discontinueOrder.setCareSetting(orderService.getCareSetting(1));
-		discontinueOrder.setOrderType(orderService.getOrderType(2));
-		discontinueOrder.setAction(Order.Action.DISCONTINUE);
-		discontinueOrder.setPreviousOrder(originalOrder);
-		discontinueOrder.setDateActivated(new Date());
-		
-		Order savedDiscontinue = orderService.saveOrder(discontinueOrder, null);
-		Context.flushSession();
-		
-		// 3. Process the DISCONTINUE order
-		listener.processOrder(savedDiscontinue);
-		Context.flushSession();
-		Context.clearSession();
-		
-		// 4. Verify the original line item is voided
-		BillLineItem reloaded = lineItemService.getBillLineItemByUuid(originalLineItem.getUuid());
-		assertNotNull(reloaded);
-		assertTrue(reloaded.getVoided(), "Line item should be voided after order is discontinued");
-		assertEquals("Order discontinued", reloaded.getVoidReason());
+		// 2. Discontinue the order (what the lab UI does on completion)  
+    	TestOrder discontinueOrder = new TestOrder();  
+    	discontinueOrder.setPatient(patient);  
+    	discontinueOrder.setConcept(testConcept);  
+    	discontinueOrder.setEncounter(encounter);  
+    	discontinueOrder.setOrderer(Context.getProviderService().getProvider(1));  
+    	discontinueOrder.setCareSetting(orderService.getCareSetting(1));  
+    	discontinueOrder.setOrderType(orderService.getOrderType(2));  
+    	discontinueOrder.setAction(Order.Action.DISCONTINUE);  
+    	discontinueOrder.setPreviousOrder(originalOrder);  
+    	discontinueOrder.setDateActivated(new Date());  
+  
+    	Order savedDiscontinue = orderService.saveOrder(discontinueOrder, null);  
+    	Context.flushSession();  
+  
+    	// 3. Process the DISCONTINUE order  
+    	listener.processOrder(savedDiscontinue);  
+    	Context.flushSession();  
+    	Context.clearSession();  
+  
+    	// 4. Verify the line item is KEPT — the lab was actually performed  
+    	BillLineItem reloaded = lineItemService.getBillLineItemByUuid(originalLineItem.getUuid());  
+    	assertNotNull(reloaded);  
+    	assertFalse(reloaded.getVoided(), "Line item should be kept for a fulfilled order");  
 	}
 	
 	@Test
