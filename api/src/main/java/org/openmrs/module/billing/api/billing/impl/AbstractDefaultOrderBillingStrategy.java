@@ -28,6 +28,7 @@ import org.openmrs.PatientProgram;
 import org.openmrs.Provider;
 import org.openmrs.api.ProgramWorkflowService;
 import org.openmrs.api.context.Context;
+import org.openmrs.api.db.hibernate.DbSessionFactory;
 import org.openmrs.module.billing.api.BillExemptionService;
 import org.openmrs.module.billing.api.BillLineItemService;
 import org.openmrs.module.billing.api.BillService;
@@ -102,7 +103,8 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
     	return runSerializedForPatient(order, () -> {  
         	Order previous = order.getPreviousOrder();  
         	if (previous != null) {  
-            	Context.getSession().evict(previous);  
+            	Context.getRegisteredComponent("sessionFactory", DbSessionFactory.class)  
+        				.getCurrentSession().evict(previous);  
             	Order fresh = Context.getOrderService().getOrder(previous.getOrderId());  
             	if (fresh == null) {  
                 	log.warn("Previous order {} not found, treating as discontinued", previous.getUuid());  
