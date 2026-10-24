@@ -10,15 +10,15 @@
 package org.openmrs.module.billing.api.billing.impl;
 
 import java.math.BigDecimal;
-import java.util.Collections;  
+import java.util.Collections;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -48,7 +48,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-
 /**
  * Default implementation base class that provides shared logic for bill creation, line item
  * voiding, exemption checking, and idempotency. Subclasses implement
@@ -76,69 +75,69 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 	
 	protected PlatformTransactionManager transactionManager;
 	
+	private static final Object[] PATIENT_LOCKS = new Object[64];
+	static {
+		for (int i = 0; i < PATIENT_LOCKS.length; i++) {
+			PATIENT_LOCKS[i] = new Object();
+		}
+	}
+	
 	{
 		setSupportedActions(EnumSet.of(Order.Action.NEW, Order.Action.RENEW, Order.Action.REVISE, Order.Action.DISCONTINUE));
 	}
 	
 	@Override
 	protected BillingResult handleNewOrder(Order order) {
-		return runSerializedForPatient(order, () -> createBillIfAbsent(order));  
+		return runSerializedForPatient(order, () -> createBillIfAbsent(order));
 	}
 	
 	@Override
 	protected BillingResult handleRenewOrder(Order order) {
-		return runSerializedForPatient(order, () -> createBillIfAbsent(order));  
+		return runSerializedForPatient(order, () -> createBillIfAbsent(order));
 	}
 	
 	@Override
 	protected BillingResult handleRevisedOrder(Order order) {
-		return runSerializedForPatient(order, () -> {  
-			voidPreviousLineItem(order, "Order revised");  
-			return createBillIfAbsent(order);  
+		return runSerializedForPatient(order, () -> {
+			voidPreviousLineItem(order, "Order revised");
+			return createBillIfAbsent(order);
 		});
 	}
 	
-	@Override  
-	protected BillingResult handleDiscontinuedOrder(Order order) {  
-    	return runSerializedForPatient(order, () -> {  
-        	Order previous = order.getPreviousOrder();  
-        	if (previous != null) {  
-            	Context.getRegisteredComponent("sessionFactory", DbSessionFactory.class)  
-        				.getCurrentSession().evict(previous);  
-            	Order fresh = Context.getOrderService().getOrder(previous.getOrderId());  
-            	if (fresh == null) {  
-                	log.warn("Previous order {} not found, treating as discontinued", previous.getUuid());  
-            	} else {  
-                	log.info("DISCONTINUE {} -> previous {} fulfillerStatus={}",  
-                    	order.getUuid(), fresh.getUuid(), fresh.getFulfillerStatus());  
-                	if (fresh.getFulfillerStatus() == Order.FulfillerStatus.COMPLETED) {  
-                    	return BillingResult.skipped("Order fulfilled - keeping line item");  
-                	}  
-            	}  
-        	}  
-        	voidPreviousLineItem(order, "Order discontinued");  
-        	return BillingResult.discontinued();  
-    	});  
-	}
-
-	
-	/**  
-	 * Runs the given billing work inside a transaction, serialized per patient.  
-	 * Only one thread per patient can be inside this at a time, so a second  
-	 * order's transaction always sees the bill committed by the first.  
-	 */  
-
-	private static final Object[] PATIENT_LOCKS = new Object[64];  
-	static {  
-    	for (int i = 0; i < PATIENT_LOCKS.length; i++) PATIENT_LOCKS[i] = new Object();  
+	@Override
+	protected BillingResult handleDiscontinuedOrder(Order order) {
+		return runSerializedForPatient(order, () -> {
+			Order previous = order.getPreviousOrder();
+			if (previous != null) {
+				Context.getRegisteredComponent("sessionFactory", DbSessionFactory.class).getCurrentSession()
+				        .evict(previous);
+				Order fresh = Context.getOrderService().getOrder(previous.getOrderId());
+				if (fresh == null) {
+					log.warn("Previous order {} not found, treating as discontinued", previous.getUuid());
+				} else {
+					log.info("DISCONTINUE {} -> previous {} fulfillerStatus={}", order.getUuid(), fresh.getUuid(),
+					    fresh.getFulfillerStatus());
+					if (fresh.getFulfillerStatus() == Order.FulfillerStatus.COMPLETED) {
+						return BillingResult.skipped("Order fulfilled - keeping line item");
+					}
+				}
+			}
+			voidPreviousLineItem(order, "Order discontinued");
+			return BillingResult.discontinued();
+		});
 	}
 	
-	private BillingResult runSerializedForPatient(Order order, Supplier<BillingResult> work) {  
-    	int idx = Math.floorMod(order.getPatient().getId(), PATIENT_LOCKS.length);  
-    	synchronized (PATIENT_LOCKS[idx]) {  
-        	TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);  
-        	return txTemplate.execute(status -> work.get());  
-    	}  
+	/**
+	 * Runs the given billing work inside a transaction, serialized per patient.
+	 * Only one thread per patient can be inside this at a time, so a second
+	 * order's transaction always sees the bill committed by the first.
+	 */
+	private BillingResult runSerializedForPatient(Order order, Supplier<BillingResult> work) {
+		int idx = Math.floorMod(order.getPatient().getId(), PATIENT_LOCKS.length);
+		synchronized (PATIENT_LOCKS[idx]) {
+			TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+			return txTemplate.execute(status -> work.get());
+		}
 	}
 	
 	protected void voidPreviousLineItem(Order order, String reason) {
@@ -181,16 +180,16 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 	}
 	
 	protected BillingResult createBill(Patient patient, BillLineItem lineItem, Order order) {
-		Bill bill = findPendingBill(patient, order);   // NEW: lines 142-152 replaced by this lookup
-
-		if (bill == null) { 
+		Bill bill = findPendingBill(patient, order); // NEW: lines 142-152 replaced by this lookup
+		
+		if (bill == null) {
 			// existing create-path (was lines 142-161) moves inside this branch
 			Provider cashier = resolveCashier(order);
 			if (cashier == null) {
 				log.error("Cannot resolve cashier for order: {}", order.getUuid());
 				return BillingResult.skipped("Cannot resolve cashier");
 			}
-		
+			
 			CashPoint cashPoint = resolveCashPoint();
 			if (cashPoint == null) {
 				log.error("Cannot resolve cash point for order: {}", order.getUuid());
@@ -205,33 +204,34 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 				bill.setVisit(order.getEncounter().getVisit());
 			}
 		}
-
-		bill.addLineItem(lineItem);  
+		
+		bill.addLineItem(lineItem);
 		bill.recalculateLineItemOrder();
-
-		Bill savedBill = billService.saveBill(bill);  
-    	return BillingResult.created(savedBill);  
-	}  
-
-	/**  
-	* Find the patient's existing PENDING bill for the order's visit. Orders without a visit do not  
- 	* aggregate — they always create a new bill.  
- 	*  
- 	* @param patient the patient to find a bill for  
- 	* @param order the order whose visit scopes the lookup  
- 	* @return the pending bill, or null if none exists  
- 	*/  
-	protected Bill findPendingBill(Patient patient, Order order) {  
-		if (order.getEncounter() == null || order.getEncounter().getVisit() == null) {  
-        	return null; // no visit -> don't aggregate  
-    	}  
-		BillSearch search = new BillSearch();
-		search.setPatientUuid(patient.getUuid());  
-    	search.setStatuses(Collections.singletonList(BillStatus.PENDING));  
-		search.setVisitUuid(order.getEncounter().getVisit().getUuid());  
-    	List<Bill> bills = billService.getBills(search, null);  
-    	return bills.isEmpty() ? null : bills.get(0);  
+		
+		Bill savedBill = billService.saveBill(bill);
+		return BillingResult.created(savedBill);
 	}
+	
+	/**
+	 * Find the patient's existing PENDING bill for the order's visit. Orders without a visit do not
+	 * aggregate — they always create a new bill.
+	 *
+	 * @param patient the patient to find a bill for
+	 * @param order the order whose visit scopes the lookup
+	 * @return the pending bill, or null if none exists
+	 */
+	protected Bill findPendingBill(Patient patient, Order order) {
+		if (order.getEncounter() == null || order.getEncounter().getVisit() == null) {
+			return null; // no visit -> don't aggregate
+		}
+		BillSearch search = new BillSearch();
+		search.setPatientUuid(patient.getUuid());
+		search.setStatuses(Collections.singletonList(BillStatus.PENDING));
+		search.setVisitUuid(order.getEncounter().getVisit().getUuid());
+		List<Bill> bills = billService.getBills(search, null);
+		return bills.isEmpty() ? null : bills.get(0);
+	}
+	
 	// resolveCashier() and resolveCashPoint() are inherited from the interface
 	// and must be implemented by concrete strategy classes.
 	
