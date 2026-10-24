@@ -206,17 +206,13 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 			}
 		}
 
-		int nextOrder = bill.getLineItems() == null ? 0  
-    		: bill.getLineItems().stream()  
-          		.mapToInt(li -> li.getLineItemOrder() == null ? 0 : li.getLineItemOrder())  
-          		.max().orElse(-1) + 1;
-		
-		lineItem.setLineItemOrder(nextOrder);
-		bill.addLineItem(lineItem);
-				
-		Bill savedBill = billService.saveBill(bill);
-		return BillingResult.created(savedBill);
-	}
+		bill.addLineItem(lineItem);  
+		bill.recalculateLineItemOrder();
+
+		Bill savedBill = billService.saveBill(bill);  
+    	return BillingResult.created(savedBill);  
+	}  
+
 	/**  
 	* Find the patient's existing PENDING bill for the order's visit. Orders without a visit do not  
  	* aggregate — they always create a new bill.  
