@@ -212,8 +212,10 @@ public class Bill extends BaseOpenmrsData {
 		if (this.lineItems == null) {
 			this.lineItems = new ArrayList<>();
 		}
+
 		
-		this.lineItems.add(item);
+		this.lineItems.add(item);  
+		item.setLineItemOrder(this.lineItems.size() - 1);  
 		item.setBill(this);
 	}
 	
