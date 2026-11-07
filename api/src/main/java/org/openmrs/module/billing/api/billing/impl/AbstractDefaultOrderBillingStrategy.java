@@ -184,19 +184,14 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 	  
 	protected BillingResult createBill(Patient patient, BillLineItem lineItem, Order order) {  
 		Bill bill = findPendingBill(patient, order);  
-	  
-		if (bill != null) {  
-			Context.getRegisteredComponent("sessionFactory", DbSessionFactory.class)  
-		        	.getCurrentSession().refresh(bill);  
-		}  
-	  
+  
 		if (bill == null) {  
 			Provider cashier = resolveCashier(order);  
 			if (cashier == null) {  
 				log.error("Cannot resolve cashier for order: {}", order.getUuid());  
 				return BillingResult.skipped("Cannot resolve cashier");  
 			}  
-		  
+  
 			CashPoint cashPoint = resolveCashPoint();  
 			if (cashPoint == null) {  
 				log.error("Cannot resolve cash point for order: {}", order.getUuid());  
@@ -211,13 +206,23 @@ public abstract class AbstractDefaultOrderBillingStrategy extends AbstractOrderB
 				bill.setVisit(order.getEncounter().getVisit());  
 			}  
 		}  
-	  
+  
+		if (bill.getId() != null) {  
+			Number count = (Number) Context.getRegisteredComponent("sessionFactory", DbSessionFactory.class)  
+		        	.getCurrentSession()  
+		        	.createQuery("select count(li) from BillLineItem li where li.bill = :bill and li.voided = false")  
+		        	.setParameter("bill", bill)  
+		        	.uniqueResult();  
+			lineItem.setLineItemOrder(count.intValue());  
+		} else {  
+			lineItem.setLineItemOrder(0);  
+		}  
+  
 		bill.addLineItem(lineItem);  
-		bill.recalculateLineItemOrder();  
-	  
+  
 		Bill savedBill = billService.saveBill(bill);  
 		return BillingResult.created(savedBill);  
-	} 
+	}
 	  
 	/**  
 	 * Find the patient's existing PENDING bill for the order's visit. Orders without a visit do not  
